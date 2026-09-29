@@ -24,7 +24,7 @@ Crea un `.env` con las variables de la tabla. Sin `WEBHOOK_URL`/`RENDER_EXTERNAL
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER` | no | Def. `smtp.office365.com`, `587`, `MY_EMAIL`. Hotmail/Outlook.com personal: `smtp-mail.outlook.com` |
 | `SMTP_PASSWORD` | sí | Contraseña de aplicación |
 | `WEBHOOK_URL` | no | URL pública; en Render se toma de `RENDER_EXTERNAL_URL` |
-| `WEBHOOK_SECRET` | en webhook | 16-256 caracteres `[A-Za-z0-9_-]` |
+| `WEBHOOK_SECRET` | en webhook | Cualquier cadena de mínimo 16 caracteres (Render la genera sola) |
 
 ## Despliegue en Render (gratis)
 1. El repo **debe ser privado** (el CV contiene datos personales). Añade el PDF con `git add -f cv.pdf`

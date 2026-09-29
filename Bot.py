@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import json
 import logging
 import mimetypes
@@ -349,15 +350,18 @@ def main() -> None:
     # Modo webhook: Telegram llama a la URL pública, lo que despierta el servicio
     # gratuito de Render cuando está dormido. El secreto valida que la petición
     # realmente viene de Telegram.
-    if not re.fullmatch(r"[A-Za-z0-9_\-]{16,256}", cfg.webhook_secret):
-        sys.exit("WEBHOOK_SECRET obligatorio en modo webhook: 16-256 caracteres [A-Za-z0-9_-]")
+    if len(cfg.webhook_secret) < 16:
+        sys.exit("WEBHOOK_SECRET obligatorio en modo webhook: mínimo 16 caracteres")
+    # Telegram solo admite [A-Za-z0-9_-] en secret_token y Render genera base64
+    # (+, /, =); el hash hexadecimal garantiza un valor válido de longitud fija.
+    secret_token = hashlib.sha256(cfg.webhook_secret.encode()).hexdigest()
     log.info("Bot en marcha (webhook en %s, puerto %s).", cfg.webhook_url, cfg.port)
     app.run_webhook(
         listen="0.0.0.0",
         port=cfg.port,
         url_path="telegram",
         webhook_url=f"{cfg.webhook_url}/telegram",
-        secret_token=cfg.webhook_secret,
+        secret_token=secret_token,
         drop_pending_updates=True,
     )
 
