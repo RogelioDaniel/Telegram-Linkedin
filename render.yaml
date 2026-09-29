@@ -1,0 +1,43 @@
+# Blueprint de Render. Plan free: el servicio se duerme tras ~15 min sin tráfico
+# y despierta con la siguiente llamada de Telegram (arranque en frío ~30-60 s).
+services:
+  - type: web
+    name: telegram-linkedin-bot
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python Bot.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.8
+      # Secretos: se capturan en el dashboard de Render, nunca en el repo.
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_ALLOWED_USER_ID
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      # Secreto para validar el webhook; Render lo genera aleatorio.
+      - key: WEBHOOK_SECRET
+        generateValue: true
+      # Datos no sensibles.
+      - key: OPENROUTER_MODEL
+        value: openai/gpt-4o-mini
+      - key: MY_NAME
+        value: Rogelio Daniel
+      - key: MY_EMAIL
+        value: rogelio-daniel@hotmail.es
+      - key: MY_HEADLINE
+        value: desarrollador de software especializado en .NET y Business Central
+      - key: MY_SKILLS
+        value: .NET,React,Angular,APIs REST,Azure DevOps,SQL Server,Business Central
+      - key: CV_PATH
+        value: cv.pdf
+      - key: SMTP_HOST
+        value: smtp-mail.outlook.com
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USER
+        value: rogelio-daniel@hotmail.es
