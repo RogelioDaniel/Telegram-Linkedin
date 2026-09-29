@@ -72,6 +72,9 @@ class Settings:
     smtp_port: int
     smtp_user: str
     smtp_pass: str
+    webhook_url: str
+    webhook_secret: str
+    port: int
 
     @classmethod
     def load(cls) -> "Settings":
@@ -92,6 +95,10 @@ class Settings:
             smtp_port=int(os.getenv("SMTP_PORT", "587")),
             smtp_user=os.getenv("SMTP_USER") or _require("MY_EMAIL"),
             smtp_pass=_require("SMTP_PASSWORD"),
+            # Render inyecta RENDER_EXTERNAL_URL; sin URL el bot usa polling (local).
+            webhook_url=(os.getenv("WEBHOOK_URL") or os.getenv("RENDER_EXTERNAL_URL", "")).rstrip("/"),
+            webhook_secret=os.getenv("WEBHOOK_SECRET", "").strip(),
+            port=int(os.getenv("PORT", "10000")),
         )
 
 
@@ -334,8 +341,25 @@ def main() -> None:
     app.add_handler(MessageHandler(filters.PHOTO | filters.Document.IMAGE, handle_image))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(CallbackQueryHandler(handle_decision, pattern=r"^(send|cancel):"))
-    log.info("Bot en marcha (polling).")
-    app.run_polling()
+    if not cfg.webhook_url:
+        log.info("Bot en marcha (polling, modo local).")
+        app.run_polling()
+        return
+
+    # Modo webhook: Telegram llama a la URL pública, lo que despierta el servicio
+    # gratuito de Render cuando está dormido. El secreto valida que la petición
+    # realmente viene de Telegram.
+    if not re.fullmatch(r"[A-Za-z0-9_\-]{16,256}", cfg.webhook_secret):
+        sys.exit("WEBHOOK_SECRET obligatorio en modo webhook: 16-256 caracteres [A-Za-z0-9_-]")
+    log.info("Bot en marcha (webhook en %s, puerto %s).", cfg.webhook_url, cfg.port)
+    app.run_webhook(
+        listen="0.0.0.0",
+        port=cfg.port,
+        url_path="telegram",
+        webhook_url=f"{cfg.webhook_url}/telegram",
+        secret_token=cfg.webhook_secret,
+        drop_pending_updates=True,
+    )
 
 
 if __name__ == "__main__":
