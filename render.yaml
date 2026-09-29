@@ -34,7 +34,7 @@ services:
       - key: MY_SKILLS
         value: .NET,React,Angular,APIs REST,Azure DevOps,SQL Server,Business Central
       - key: CV_PATH
-        value: cv.pdf
+        value: Rogelio_Daniel_Roldan_Guzman.pdf
       - key: SMTP_HOST
         value: smtp-mail.outlook.com
       - key: SMTP_PORT
