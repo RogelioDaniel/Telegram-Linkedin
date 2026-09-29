@@ -73,6 +73,7 @@ class Settings:
     smtp_port: int
     smtp_user: str
     smtp_pass: str
+    brevo_api_key: str
     webhook_url: str
     webhook_secret: str
     port: int
@@ -82,6 +83,10 @@ class Settings:
         cv = Path(_require("CV_PATH"))
         if not cv.is_file():
             sys.exit(f"No existe el CV en CV_PATH: {cv}")
+        brevo_key = os.getenv("BREVO_API_KEY", "").strip()
+        smtp_pass = os.getenv("SMTP_PASSWORD", "").strip()
+        if not brevo_key and not smtp_pass:
+            sys.exit("Define BREVO_API_KEY (recomendado en Render) o SMTP_PASSWORD")
         return cls(
             telegram_token=_require("TELEGRAM_BOT_TOKEN"),
             allowed_user_id=int(_require("TELEGRAM_ALLOWED_USER_ID")),
@@ -95,7 +100,8 @@ class Settings:
             smtp_host=os.getenv("SMTP_HOST", "smtp.office365.com"),
             smtp_port=int(os.getenv("SMTP_PORT", "587")),
             smtp_user=os.getenv("SMTP_USER") or _require("MY_EMAIL"),
-            smtp_pass=_require("SMTP_PASSWORD"),
+            smtp_pass=smtp_pass,
+            brevo_api_key=brevo_key,
             # Render inyecta RENDER_EXTERNAL_URL; sin URL el bot usa polling (local).
             webhook_url=(os.getenv("WEBHOOK_URL") or os.getenv("RENDER_EXTERNAL_URL", "")).rstrip("/"),
             webhook_secret=os.getenv("WEBHOOK_SECRET", "").strip(),
@@ -205,7 +211,44 @@ def build_draft(cfg: Settings, job: dict, to: str) -> Draft:
 
 
 def send_email(cfg: Settings, draft: Draft) -> None:
-    """Envía el borrador con el CV adjunto por SMTP (STARTTLS)."""
+    """Envía el borrador con el CV adjunto.
+
+    Usa la API HTTP de Brevo si hay ``BREVO_API_KEY`` (necesario en Render free,
+    que bloquea SMTP saliente); en caso contrario, SMTP directo.
+    """
+    if cfg.brevo_api_key:
+        _send_via_brevo(cfg, draft)
+    else:
+        _send_via_smtp(cfg, draft)
+
+
+def _send_via_brevo(cfg: Settings, draft: Draft) -> None:
+    """Envía por la API transaccional de Brevo (HTTPS, puerto 443)."""
+    resp = requests.post(
+        "https://api.brevo.com/v3/smtp/email",
+        headers={"api-key": cfg.brevo_api_key, "accept": "application/json"},
+        json={
+            "sender": {"name": cfg.my_name, "email": cfg.my_email},
+            "to": [{"email": draft.to}],
+            "replyTo": {"email": cfg.my_email, "name": cfg.my_name},
+            "subject": draft.subject,
+            "textContent": draft.body,
+            "attachment": [
+                {
+                    "name": cfg.cv_path.name,
+                    "content": base64.b64encode(cfg.cv_path.read_bytes()).decode(),
+                }
+            ],
+        },
+        timeout=30,
+    )
+    if not resp.ok:
+        # El cuerpo de Brevo explica el rechazo (remitente sin verificar, cuota, etc.).
+        raise RuntimeError(f"Brevo {resp.status_code}: {resp.text[:300]}")
+
+
+def _send_via_smtp(cfg: Settings, draft: Draft) -> None:
+    """Envía por SMTP con STARTTLS."""
     msg = EmailMessage()
     msg["From"] = cfg.my_email
     msg["To"] = draft.to

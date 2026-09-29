@@ -22,7 +22,8 @@ Crea un `.env` con las variables de la tabla. Sin `WEBHOOK_URL`/`RENDER_EXTERNAL
 | `MY_HEADLINE`, `MY_SKILLS` | no | Presentación y skills que se pueden afirmar en el correo |
 | `CV_PATH` | sí | Ruta al PDF del CV |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER` | no | Def. `smtp.office365.com`, `587`, `MY_EMAIL`. Hotmail/Outlook.com personal: `smtp-mail.outlook.com` |
-| `SMTP_PASSWORD` | sí | Contraseña de aplicación |
+| `BREVO_API_KEY` | una de las dos | Clave de la API de Brevo (envío por HTTPS). **Obligatoria en Render free**, que bloquea SMTP saliente. Tiene prioridad sobre SMTP |
+| `SMTP_PASSWORD` | una de las dos | Contraseña de aplicación; solo para uso local sin Brevo |
 | `WEBHOOK_URL` | no | URL pública; en Render se toma de `RENDER_EXTERNAL_URL` |
 | `WEBHOOK_SECRET` | en webhook | Cualquier cadena de mínimo 16 caracteres (Render la genera sola) |
 

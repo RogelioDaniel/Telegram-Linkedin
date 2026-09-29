@@ -17,7 +17,8 @@ services:
         sync: false
       - key: OPENROUTER_API_KEY
         sync: false
-      - key: SMTP_PASSWORD
+      # Render free bloquea SMTP saliente: el correo sale por la API HTTP de Brevo.
+      - key: BREVO_API_KEY
         sync: false
       # Secreto para validar el webhook; Render lo genera aleatorio.
       - key: WEBHOOK_SECRET
