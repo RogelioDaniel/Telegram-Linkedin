@@ -433,7 +433,7 @@ def main() -> None:
         url_path="telegram",
         webhook_url=f"{cfg.webhook_url}/telegram",
         secret_token=secret_token,
-        drop_pending_updates=True,
+        drop_pending_updates=False,  # conserva el mensaje que despertó al servicio dormido
     )
 
 
