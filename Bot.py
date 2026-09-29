@@ -387,12 +387,21 @@ async def handle_decision(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await query.edit_message_text("Cancelado. No se envió nada.")
         return
     await query.edit_message_text(f"Enviando a {draft.to}…")
+    via = "gmail-api" if cfg.gmail_refresh_token else "smtp"
+    log.info("Enviando correo vía %s (asunto=%r)", via, draft.subject)
     try:
-        await asyncio.to_thread(send_email, cfg, draft)
-    except Exception:
-        log.exception("Fallo en el envío")
-        await query.edit_message_text("❌ Falló el envío (revisa credenciales SMTP en los logs).")
+        # wait_for evita que el chat quede en «Enviando…» si una conexión se cuelga
+        # (p. ej. resolución DNS, que no respeta el timeout de requests/smtplib).
+        await asyncio.wait_for(asyncio.to_thread(send_email, cfg, draft), timeout=90)
+    except asyncio.TimeoutError:
+        log.error("Timeout enviando correo vía %s", via)
+        await query.edit_message_text("❌ El envío tardó demasiado (timeout). Reintenta en un momento.")
         return
+    except Exception as exc:
+        log.exception("Fallo en el envío vía %s", via)
+        await query.edit_message_text(f"❌ Falló el envío: {str(exc)[:200]}")
+        return
+    log.info("Correo enviado vía %s", via)
     await query.edit_message_text(f"✅ Correo enviado a {draft.to}\nAsunto: {draft.subject}")
 
 
