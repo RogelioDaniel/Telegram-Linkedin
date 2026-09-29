@@ -15,8 +15,15 @@ services:
         sync: false
       - key: TELEGRAM_ALLOWED_USER_ID
         sync: false
+      # Proveedores de visión (gratis y con respaldo en cadena): basta con uno.
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
       - key: OPENROUTER_API_KEY
         sync: false
+      - key: VISION_ORDER
+        value: gemini,groq,openrouter
       # Render free bloquea SMTP saliente: el correo sale por la Gmail API (HTTPS).
       - key: GMAIL_CLIENT_ID
         sync: false

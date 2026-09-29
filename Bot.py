@@ -3,7 +3,7 @@
 
 Flujo:
     1. Recibes una captura (foto o archivo de imagen) en Telegram.
-    2. Un modelo de visión (OpenRouter) extrae empresa, puesto, contacto y email.
+    2. Un modelo de visión (Gemini, Groq u OpenRouter, con respaldo entre ellos) extrae empresa, puesto, contacto y email.
     3. El bot arma el borrador (asunto + mensaje + CV adjunto) y te lo muestra.
     4. Solo si pulsas «Enviar» se manda el correo por Gmail API o SMTP (human-in-the-loop).
 
@@ -64,6 +64,11 @@ class Settings:
     allowed_user_id: int
     openrouter_key: str
     openrouter_model: str
+    gemini_key: str
+    gemini_model: str
+    groq_key: str
+    groq_model: str
+    vision_order: list[str]
     my_name: str
     my_email: str
     my_headline: str
@@ -92,11 +97,22 @@ class Settings:
             sys.exit("Gmail incompleto: define GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET y GMAIL_REFRESH_TOKEN")
         if not any(gmail.values()) and not smtp_pass:
             sys.exit("Define las credenciales de Gmail API (recomendado en Render) o SMTP_PASSWORD")
+        if not any(os.getenv(k, "").strip() for k in ("GEMINI_API_KEY", "GROQ_API_KEY", "OPENROUTER_API_KEY")):
+            sys.exit("Define al menos una clave de visión: GEMINI_API_KEY, GROQ_API_KEY u OPENROUTER_API_KEY")
         return cls(
             telegram_token=_require("TELEGRAM_BOT_TOKEN"),
             allowed_user_id=int(_require("TELEGRAM_ALLOWED_USER_ID")),
-            openrouter_key=_require("OPENROUTER_API_KEY"),
+            openrouter_key=os.getenv("OPENROUTER_API_KEY", "").strip(),
             openrouter_model=os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini"),
+            gemini_key=os.getenv("GEMINI_API_KEY", "").strip(),
+            gemini_model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
+            groq_key=os.getenv("GROQ_API_KEY", "").strip(),
+            groq_model=os.getenv("GROQ_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct"),
+            vision_order=[
+                v.strip().lower()
+                for v in os.getenv("VISION_ORDER", "gemini,groq,openrouter").split(",")
+                if v.strip()
+            ],
             my_name=_require("MY_NAME"),
             my_email=_require("MY_EMAIL"),
             my_headline=os.getenv("MY_HEADLINE", "desarrollador de software"),
@@ -137,19 +153,13 @@ EXTRACTION_PROMPT = (
 )
 
 
-def extract_job_data(cfg: Settings, image: bytes, mime: str) -> dict:
-    """Envía la imagen al modelo de visión y devuelve los campos de la oferta.
-
-    Raises:
-        requests.HTTPError: si OpenRouter responde con error.
-        ValueError: si la respuesta no contiene un JSON válido.
-    """
-    b64 = base64.b64encode(image).decode()
+def _openai_compatible(url: str, key: str, model: str, b64: str, mime: str) -> str:
+    """Llama a un endpoint /chat/completions compatible con OpenAI (OpenRouter, Groq)."""
     resp = requests.post(
-        "https://openrouter.ai/api/v1/chat/completions",
-        headers={"Authorization": f"Bearer {cfg.openrouter_key}"},
+        url,
+        headers={"Authorization": f"Bearer {key}"},
         json={
-            "model": cfg.openrouter_model,
+            "model": model,
             "temperature": 0,
             "messages": [
                 {
@@ -161,10 +171,31 @@ def extract_job_data(cfg: Settings, image: bytes, mime: str) -> dict:
                 }
             ],
         },
-        timeout=90,
+        timeout=60,
     )
     resp.raise_for_status()
-    content = resp.json()["choices"][0]["message"]["content"]
+    return resp.json()["choices"][0]["message"]["content"]
+
+
+def _gemini(key: str, model: str, b64: str, mime: str) -> str:
+    """Llama a la API de Gemini (la clave va en cabecera, no en la URL, para no filtrarla en logs)."""
+    resp = requests.post(
+        f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+        headers={"x-goog-api-key": key},
+        json={
+            "contents": [
+                {"parts": [{"text": EXTRACTION_PROMPT}, {"inline_data": {"mime_type": mime, "data": b64}}]}
+            ],
+            "generationConfig": {"temperature": 0},
+        },
+        timeout=60,
+    )
+    resp.raise_for_status()
+    return resp.json()["candidates"][0]["content"]["parts"][0]["text"]
+
+
+def _parse_job_json(content: str) -> dict:
+    """Extrae el objeto JSON de la respuesta del modelo."""
     match = re.search(r"\{.*\}", content, re.DOTALL)
     if not match:
         raise ValueError("El modelo no devolvió JSON")
@@ -172,6 +203,49 @@ def extract_job_data(cfg: Settings, image: bytes, mime: str) -> dict:
     if not isinstance(data, dict):
         raise ValueError("El JSON del modelo no es un objeto")
     return data
+
+
+def extract_job_data(cfg: Settings, image: bytes, mime: str) -> dict:
+    """Extrae los campos de la oferta probando cada proveedor de visión en orden.
+
+    El orden sale de ``VISION_ORDER``; se omiten los proveedores sin clave y, si uno
+    falla (cuota, saldo, red, JSON inválido), se pasa al siguiente.
+
+    Raises:
+        RuntimeError: si todos los proveedores configurados fallan.
+    """
+    b64 = base64.b64encode(image).decode()
+    providers = {
+        "gemini": (cfg.gemini_key, lambda: _gemini(cfg.gemini_key, cfg.gemini_model, b64, mime)),
+        "groq": (
+            cfg.groq_key,
+            lambda: _openai_compatible(
+                "https://api.groq.com/openai/v1/chat/completions",
+                cfg.groq_key, cfg.groq_model, b64, mime,
+            ),
+        ),
+        "openrouter": (
+            cfg.openrouter_key,
+            lambda: _openai_compatible(
+                "https://openrouter.ai/api/v1/chat/completions",
+                cfg.openrouter_key, cfg.openrouter_model, b64, mime,
+            ),
+        ),
+    }
+    errors: list[str] = []
+    for name in cfg.vision_order:
+        key, call = providers.get(name, ("", None))
+        if not key or call is None:
+            continue
+        try:
+            job = _parse_job_json(call())
+            log.info("Extracción correcta con %s", name)
+            return job
+        except Exception as exc:
+            # str(exc) de requests incluye el código HTTP y la URL, nunca las claves.
+            log.warning("Proveedor de visión %s falló: %s", name, exc)
+            errors.append(f"{name}: {type(exc).__name__}")
+    raise RuntimeError("Todos los proveedores de visión fallaron: " + ", ".join(errors))
 
 
 # ------------------------------------------------------------------- Borrador

@@ -9,6 +9,8 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 
 - Envío de correo por Gmail API (HTTPS), con SMTP como alternativa local, y `get_gmail_token.py` para obtener el refresh token.
 
+- Extracción de la captura con varios proveedores de visión (Gemini, Groq, OpenRouter) y respaldo automático si uno falla.
+
 ### Fixed
 - `WEBHOOK_SECRET` en base64 (generado por Render) ya no se rechaza.
 
