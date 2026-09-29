@@ -17,8 +17,15 @@ services:
         sync: false
       - key: OPENROUTER_API_KEY
         sync: false
-      # Render free bloquea SMTP saliente: el correo sale por la API HTTP de Brevo.
-      - key: BREVO_API_KEY
+      # Render free bloquea SMTP saliente: el correo sale por la Gmail API (HTTPS).
+      - key: GMAIL_CLIENT_ID
+        sync: false
+      - key: GMAIL_CLIENT_SECRET
+        sync: false
+      - key: GMAIL_REFRESH_TOKEN
+        sync: false
+      # Tu dirección de Gmail (firma del correo y Reply-To).
+      - key: MY_EMAIL
         sync: false
       # Secreto para validar el webhook; Render lo genera aleatorio.
       - key: WEBHOOK_SECRET
@@ -28,17 +35,9 @@ services:
         value: openai/gpt-4o-mini
       - key: MY_NAME
         value: Rogelio Daniel
-      - key: MY_EMAIL
-        value: rogelio-daniel@hotmail.es
       - key: MY_HEADLINE
         value: desarrollador de software especializado en .NET y Business Central
       - key: MY_SKILLS
         value: .NET,React,Angular,APIs REST,Azure DevOps,SQL Server,Business Central
       - key: CV_PATH
         value: Rogelio_Daniel_Roldan_Guzman.pdf
-      - key: SMTP_HOST
-        value: smtp-mail.outlook.com
-      - key: SMTP_PORT
-        value: "587"
-      - key: SMTP_USER
-        value: rogelio-daniel@hotmail.es

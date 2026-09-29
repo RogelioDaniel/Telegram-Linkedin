@@ -5,7 +5,7 @@ Flujo:
     1. Recibes una captura (foto o archivo de imagen) en Telegram.
     2. Un modelo de visión (OpenRouter) extrae empresa, puesto, contacto y email.
     3. El bot arma el borrador (asunto + mensaje + CV adjunto) y te lo muestra.
-    4. Solo si pulsas «Enviar» se manda el correo por SMTP (human-in-the-loop).
+    4. Solo si pulsas «Enviar» se manda el correo por Gmail API o SMTP (human-in-the-loop).
 
 Variables de entorno: ver ``.env.example``.
 """
@@ -73,7 +73,9 @@ class Settings:
     smtp_port: int
     smtp_user: str
     smtp_pass: str
-    brevo_api_key: str
+    gmail_client_id: str
+    gmail_client_secret: str
+    gmail_refresh_token: str
     webhook_url: str
     webhook_secret: str
     port: int
@@ -83,10 +85,13 @@ class Settings:
         cv = Path(_require("CV_PATH"))
         if not cv.is_file():
             sys.exit(f"No existe el CV en CV_PATH: {cv}")
-        brevo_key = os.getenv("BREVO_API_KEY", "").strip()
+        gmail = {k: os.getenv(k, "").strip() for k in
+                 ("GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET", "GMAIL_REFRESH_TOKEN")}
         smtp_pass = os.getenv("SMTP_PASSWORD", "").strip()
-        if not brevo_key and not smtp_pass:
-            sys.exit("Define BREVO_API_KEY (recomendado en Render) o SMTP_PASSWORD")
+        if any(gmail.values()) and not all(gmail.values()):
+            sys.exit("Gmail incompleto: define GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET y GMAIL_REFRESH_TOKEN")
+        if not any(gmail.values()) and not smtp_pass:
+            sys.exit("Define las credenciales de Gmail API (recomendado en Render) o SMTP_PASSWORD")
         return cls(
             telegram_token=_require("TELEGRAM_BOT_TOKEN"),
             allowed_user_id=int(_require("TELEGRAM_ALLOWED_USER_ID")),
@@ -101,7 +106,9 @@ class Settings:
             smtp_port=int(os.getenv("SMTP_PORT", "587")),
             smtp_user=os.getenv("SMTP_USER") or _require("MY_EMAIL"),
             smtp_pass=smtp_pass,
-            brevo_api_key=brevo_key,
+            gmail_client_id=gmail["GMAIL_CLIENT_ID"],
+            gmail_client_secret=gmail["GMAIL_CLIENT_SECRET"],
+            gmail_refresh_token=gmail["GMAIL_REFRESH_TOKEN"],
             # Render inyecta RENDER_EXTERNAL_URL; sin URL el bot usa polling (local).
             webhook_url=(os.getenv("WEBHOOK_URL") or os.getenv("RENDER_EXTERNAL_URL", "")).rstrip("/"),
             webhook_secret=os.getenv("WEBHOOK_SECRET", "").strip(),
@@ -210,55 +217,67 @@ def build_draft(cfg: Settings, job: dict, to: str) -> Draft:
     return Draft(to=to, subject=subject, body="\n".join(partes))
 
 
-def send_email(cfg: Settings, draft: Draft) -> None:
-    """Envía el borrador con el CV adjunto.
-
-    Usa la API HTTP de Brevo si hay ``BREVO_API_KEY`` (necesario en Render free,
-    que bloquea SMTP saliente); en caso contrario, SMTP directo.
-    """
-    if cfg.brevo_api_key:
-        _send_via_brevo(cfg, draft)
-    else:
-        _send_via_smtp(cfg, draft)
-
-
-def _send_via_brevo(cfg: Settings, draft: Draft) -> None:
-    """Envía por la API transaccional de Brevo (HTTPS, puerto 443)."""
-    resp = requests.post(
-        "https://api.brevo.com/v3/smtp/email",
-        headers={"api-key": cfg.brevo_api_key, "accept": "application/json"},
-        json={
-            "sender": {"name": cfg.my_name, "email": cfg.my_email},
-            "to": [{"email": draft.to}],
-            "replyTo": {"email": cfg.my_email, "name": cfg.my_name},
-            "subject": draft.subject,
-            "textContent": draft.body,
-            "attachment": [
-                {
-                    "name": cfg.cv_path.name,
-                    "content": base64.b64encode(cfg.cv_path.read_bytes()).decode(),
-                }
-            ],
-        },
-        timeout=30,
-    )
-    if not resp.ok:
-        # El cuerpo de Brevo explica el rechazo (remitente sin verificar, cuota, etc.).
-        raise RuntimeError(f"Brevo {resp.status_code}: {resp.text[:300]}")
-
-
-def _send_via_smtp(cfg: Settings, draft: Draft) -> None:
-    """Envía por SMTP con STARTTLS."""
+def _build_message(cfg: Settings, draft: Draft, *, with_from: bool) -> EmailMessage:
+    """Construye el mensaje MIME con el CV adjunto."""
     msg = EmailMessage()
-    msg["From"] = cfg.my_email
+    if with_from:
+        msg["From"] = cfg.my_email
     msg["To"] = draft.to
     msg["Subject"] = draft.subject
+    msg["Reply-To"] = cfg.my_email
     msg.set_content(draft.body)
     mime, _ = mimetypes.guess_type(cfg.cv_path.name)
     maintype, _, subtype = (mime or "application/octet-stream").partition("/")
     msg.add_attachment(
         cfg.cv_path.read_bytes(), maintype=maintype, subtype=subtype, filename=cfg.cv_path.name
     )
+    return msg
+
+
+def send_email(cfg: Settings, draft: Draft) -> None:
+    """Envía el borrador con el CV adjunto.
+
+    Usa la Gmail API (HTTPS) si hay credenciales de Gmail: necesario en Render free,
+    que bloquea SMTP saliente. En caso contrario, SMTP directo (uso local).
+    """
+    if cfg.gmail_refresh_token:
+        _send_via_gmail(cfg, draft)
+    else:
+        _send_via_smtp(cfg, draft)
+
+
+def _send_via_gmail(cfg: Settings, draft: Draft) -> None:
+    """Envía por la Gmail API con un access token obtenido del refresh token."""
+    token_resp = requests.post(
+        "https://oauth2.googleapis.com/token",
+        data={
+            "client_id": cfg.gmail_client_id,
+            "client_secret": cfg.gmail_client_secret,
+            "refresh_token": cfg.gmail_refresh_token,
+            "grant_type": "refresh_token",
+        },
+        timeout=30,
+    )
+    if not token_resp.ok:
+        # invalid_grant = refresh token revocado/caducado (ver README, runbook).
+        raise RuntimeError(f"Google OAuth {token_resp.status_code}: {token_resp.text[:300]}")
+    access_token = token_resp.json()["access_token"]
+
+    # Sin cabecera From: Gmail usa la cuenta autenticada como remitente.
+    raw = base64.urlsafe_b64encode(_build_message(cfg, draft, with_from=False).as_bytes()).decode()
+    resp = requests.post(
+        "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
+        headers={"Authorization": f"Bearer {access_token}"},
+        json={"raw": raw},
+        timeout=30,
+    )
+    if not resp.ok:
+        raise RuntimeError(f"Gmail API {resp.status_code}: {resp.text[:300]}")
+
+
+def _send_via_smtp(cfg: Settings, draft: Draft) -> None:
+    """Envía por SMTP con STARTTLS."""
+    msg = _build_message(cfg, draft, with_from=True)
     with smtplib.SMTP(cfg.smtp_host, cfg.smtp_port, timeout=30) as smtp:
         smtp.starttls(context=ssl.create_default_context())
         smtp.login(cfg.smtp_user, cfg.smtp_pass)

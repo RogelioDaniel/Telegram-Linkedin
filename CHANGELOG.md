@@ -7,7 +7,7 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 - Modo webhook para desplegar en Render (plan gratuito) con secreto de validación.
 - `render.yaml`, `README.md` con runbook y variables de entorno.
 
-- Envío de correo por la API HTTP de Brevo (`BREVO_API_KEY`), con SMTP como alternativa local.
+- Envío de correo por Gmail API (HTTPS), con SMTP como alternativa local, y `get_gmail_token.py` para obtener el refresh token.
 
 ### Fixed
 - `WEBHOOK_SECRET` en base64 (generado por Render) ya no se rechaza.
