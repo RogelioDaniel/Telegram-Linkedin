@@ -2,3 +2,4 @@
 *.pdf
 __pycache__/
 .venv/
+client_secret*.json
