@@ -15,6 +15,7 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 
 - Correo en HTML con firma profesional y versión de texto plano; `preview_email.py` para previsualizarlo.
 
+- Rediseño de la plantilla: tarjeta con membrete (monograma, franja azul marino), recuadro de vacante, etiquetas de experiencia y firma con contactos.
 - Botón de WhatsApp animado (GIF incrustado) y `tools/make_whatsapp_gif.py` para regenerarlo.
 - Botón de WhatsApp en el correo con mensaje precargado personalizado a la oferta (`MY_WHATSAPP`).
 

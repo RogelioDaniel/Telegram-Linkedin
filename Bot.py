@@ -349,7 +349,7 @@ def build_draft(cfg: Settings, job: dict, to: str) -> Draft:
         to=to,
         subject=subject,
         body="\n".join(partes),
-        html=_render_html(cfg, saludo, intro, cubiertos, cierre, puesto, empresa, wa_url),
+        html=_render_html(cfg, saludo, intro, cubiertos, cierre, puesto, empresa, wa_url, lugar),
     )
 
 
@@ -379,37 +379,51 @@ def _render_html(
     puesto: str,
     empresa: str,
     wa_url: str = "",
+    lugar: str = "",
 ) -> str:
     """Genera el cuerpo HTML del correo (tablas + estilos en línea, compatible con Gmail/Outlook).
 
+    Diseño de «membrete»: tarjeta blanca sobre fondo gris claro, franja superior azul marino,
+    monograma con iniciales, recuadro con los datos de la vacante y firma con contactos.
     Todo texto que proviene de la captura se escapa con ``html.escape``. Gmail elimina
-    scripts y animaciones, por lo que el diseño se limita a tipografía y espaciado.
+    scripts y CSS animado, por lo que el diseño se limita a tipografía, color y espaciado.
     """
     e = html.escape
-    p_style = f"margin:0 0 16px 0;font-family:{_FONT};font-size:15px;line-height:1.6;color:#1f2937;"
+    line = "#e3e8ef"
+    muted = "#6b7280"
+    p_style = f"margin:0 0 16px 0;font-family:{_FONT};font-size:15px;line-height:1.65;color:#1f2937;"
+    label = f"font-family:{_FONT};font-size:11px;font-weight:600;letter-spacing:1.2px;color:{muted};text-transform:uppercase;"
+    divider = f'<div style="height:1px;line-height:1px;font-size:1px;background:{line};">&nbsp;</div>'
+
+    initials = "".join(w[0] for w in cfg.my_name.split()[:2]).upper() or "•"
+
+    # Recuadro con los datos de la vacante (solo si hay algo que mostrar).
+    detalle = " &nbsp;·&nbsp; ".join(e(x) for x in (empresa, lugar) if x)
+    vacante = ""
+    if puesto:
+        vacante = (
+            '<tr><td style="padding:0 32px 20px 32px;">'
+            f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#f6f8fb" '
+            f'style="background:#f6f8fb;border-left:3px solid {_ACCENT};border-radius:4px;">'
+            '<tr><td style="padding:12px 16px;">'
+            f'<div style="{label}">Vacante</div>'
+            f'<div style="margin-top:4px;font-family:{_FONT};font-size:16px;font-weight:600;color:{_ACCENT};">{e(puesto)}</div>'
+            + (f'<div style="margin-top:2px;font-family:{_FONT};font-size:13px;color:{muted};">{detalle}</div>' if detalle else "")
+            + "</td></tr></table></td></tr>"
+        )
 
     chips = ""
     if skills:
         chip = (
-            "display:inline-block;margin:0 6px 6px 0;padding:4px 10px;border-radius:12px;"
+            "display:inline-block;margin:0 6px 6px 0;padding:5px 11px;border-radius:14px;"
             f"background:#eef2f7;color:{_ACCENT};font-family:{_FONT};font-size:13px;line-height:1.4;"
         )
         spans = "".join(f'<span style="{chip}">{e(x)}</span>' for x in skills)
         chips = (
-            f'<p style="{p_style}margin-bottom:8px;">Experiencia relevante para el puesto:</p>'
-            f'<div style="margin:0 0 20px 0;">{spans}</div>'
+            '<tr><td style="padding:0 32px 12px 32px;">'
+            f'<div style="{label}margin-bottom:8px;">Experiencia relevante</div>'
+            f'<div>{spans}</div></td></tr>'
         )
-
-    links = []
-    if cfg.my_email:
-        links.append(_link(f"mailto:{cfg.my_email}", cfg.my_email))
-    if cfg.my_phone:
-        links.append(_link("tel:" + re.sub(r"[^\d+]", "", cfg.my_phone), cfg.my_phone))
-    if cfg.my_linkedin:
-        links.append(_link(cfg.my_linkedin, "LinkedIn"))
-    if cfg.my_github:
-        links.append(_link(cfg.my_github, "GitHub"))
-    contact_line = " &nbsp;·&nbsp; ".join(links)
 
     whatsapp = ""
     if wa_url:
@@ -427,30 +441,56 @@ def _render_html(
                 f"display:inline-block;padding:9px 16px;border:1px solid {_ACCENT};border-radius:6px;"
                 f"color:{_ACCENT};text-decoration:none;font-family:{_FONT};font-size:14px;font-weight:500;"
             )
-        whatsapp = f'<p style="{p_style}margin-bottom:20px;"><a href="{href}" style="{link_style}">{inner}</a></p>'
+        whatsapp = f'<tr><td style="padding:4px 32px 24px 32px;"><a href="{href}" style="{link_style}">{inner}</a></td></tr>'
+
+    links = []
+    if cfg.my_email:
+        links.append(_link(f"mailto:{cfg.my_email}", cfg.my_email))
+    if cfg.my_phone:
+        # espacios no separables: el número no debe partirse en dos líneas
+        links.append(_link("tel:" + re.sub(r"[^\d+]", "", cfg.my_phone), cfg.my_phone.replace(" ", " ")))
+    if cfg.my_linkedin:
+        links.append(_link(cfg.my_linkedin, "LinkedIn"))
+    if cfg.my_github:
+        links.append(_link(cfg.my_github, "GitHub"))
+    contact_line = " &nbsp;·&nbsp; ".join(links)
 
     preheader = e(f"Postulación a {puesto}" + (f" en {empresa}" if empresa else "") + f" — {cfg.my_name}")
     return f"""<!DOCTYPE html>
 <html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-<body style="margin:0;padding:0;background:#ffffff;">
-<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:#ffffff;">{preheader}</div>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#ffffff;">
-<tr><td align="center" style="padding:24px 16px;">
-<table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;">
-<tr><td style="padding:0 0 4px 0;">
+<body bgcolor="#f3f5f8" style="margin:0;padding:0;background:#f3f5f8;">
+<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:#f3f5f8;">{preheader}</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#f3f5f8" style="background:#f3f5f8;">
+<tr><td align="center" style="padding:28px 12px;">
+<table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" bgcolor="#ffffff" style="width:100%;max-width:600px;background:#ffffff;border:1px solid {line};border-top:4px solid {_ACCENT};border-radius:10px;">
+<tr><td style="padding:24px 32px 20px 32px;">
+<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+<td width="44" valign="top" style="width:44px;">
+<div style="width:44px;height:44px;line-height:44px;border-radius:22px;background:{_ACCENT};color:#ffffff;text-align:center;font-family:{_FONT};font-size:15px;font-weight:600;letter-spacing:1px;">{e(initials)}</div>
+</td>
+<td valign="top" style="padding-left:14px;">
+<div style="font-family:{_FONT};font-size:17px;font-weight:600;color:{_ACCENT};">{e(cfg.my_name)}</div>
+<div style="margin-top:2px;font-family:{_FONT};font-size:13px;color:{muted};">{e(cfg.my_headline)}</div>
+</td></tr></table>
+</td></tr>
+<tr><td style="padding:0 32px;">{divider}</td></tr>
+<tr><td style="padding:24px 32px 4px 32px;">
 <p style="{p_style}">{e(saludo)}</p>
 <p style="{p_style}">{e(intro)}</p>
+</td></tr>
+{vacante}
 {chips}
+<tr><td style="padding:8px 32px 4px 32px;">
 <p style="{p_style}">{e(cierre)}</p>
-{whatsapp}<p style="{p_style}margin-bottom:24px;">Saludos cordiales,</p>
 </td></tr>
-<tr><td style="padding:16px 0 0 0;border-top:1px solid #e5e7eb;">
-<div style="width:40px;height:3px;background:{_ACCENT};margin:-17px 0 14px 0;"></div>
-<p style="margin:0;font-family:{_FONT};font-size:16px;font-weight:600;color:{_ACCENT};">{e(cfg.my_name)}</p>
-<p style="margin:2px 0 8px 0;font-family:{_FONT};font-size:13px;color:#6b7280;">{e(cfg.my_headline)}</p>
-<p style="margin:0 0 14px 0;font-family:{_FONT};font-size:13px;color:#6b7280;">{contact_line}</p>
-<p style="margin:0;font-family:{_FONT};font-size:12px;color:#9ca3af;">&#128206; CV adjunto en PDF</p>
+{whatsapp}
+<tr><td style="padding:0 32px 24px 32px;">
+<p style="margin:0 0 12px 0;font-family:{_FONT};font-size:15px;color:#1f2937;">Saludos cordiales,</p>
+<div style="font-family:{_FONT};font-size:15px;font-weight:600;color:{_ACCENT};">{e(cfg.my_name)}</div>
+<div style="margin-top:6px;font-family:{_FONT};font-size:13px;line-height:1.7;color:{muted};">{contact_line}</div>
 </td></tr>
+<tr><td style="padding:0 32px;">{divider}</td></tr>
+<tr><td style="padding:14px 32px 20px 32px;font-family:{_FONT};font-size:12px;color:#9ca3af;">&#128206; Se adjunta CV en formato PDF</td></tr>
 </table>
 </td></tr></table>
 </body></html>"""
