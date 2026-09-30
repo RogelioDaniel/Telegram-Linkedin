@@ -21,12 +21,20 @@ Crea un `.env` con las variables de la tabla. Sin `WEBHOOK_URL`/`RENDER_EXTERNAL
 | `GEMINI_MODEL`, `GITHUB_MODEL`, `MISTRAL_MODEL`, `NVIDIA_MODEL`, `GROQ_MODEL`, `OPENROUTER_MODEL` | no | Lista de modelos con visión separados por coma, probados en orden. `GROQ_MODEL` no tiene valor por defecto: defínelo con un ID de visión vigente de console.groq.com/docs/models |
 | `MY_NAME`, `MY_EMAIL` | sí | Remitente |
 | `MY_HEADLINE`, `MY_SKILLS` | no | Presentación y skills que se pueden afirmar en el correo |
+| `MY_PHONE`, `MY_LINKEDIN`, `MY_GITHUB` | no | Datos de contacto de la firma; solo se muestran los definidos (los enlaces deben empezar con `https://`) |
 | `CV_PATH` | sí | Ruta al PDF del CV |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER` | no | Def. `smtp.office365.com`, `587`, `MY_EMAIL`. Hotmail/Outlook.com personal: `smtp-mail.outlook.com` |
 | `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN` | las tres, o SMTP | Envío por Gmail API (HTTPS). **Obligatorio en Render free**, que bloquea SMTP saliente. Se generan con `get_gmail_token.py`. Tienen prioridad sobre SMTP |
 | `SMTP_PASSWORD` | si no usas Gmail API | Contraseña de aplicación; solo para uso local |
 | `WEBHOOK_URL` | no | URL pública; en Render se toma de `RENDER_EXTERNAL_URL` |
 | `WEBHOOK_SECRET` | en webhook | Cualquier cadena de mínimo 16 caracteres (Render la genera sola) |
+
+## Plantilla del correo
+El correo se envía como HTML (tablas y estilos en línea, compatible con Gmail/Outlook) más una versión de texto
+plano de respaldo. Gmail elimina scripts y animaciones, por lo que no hay efectos al abrirlo. Para verlo sin enviar nada:
+```bash
+python preview_email.py --open
+```
 
 ## Despliegue en Render (gratis)
 1. El repo **debe ser privado** (el CV contiene datos personales). Añade el PDF con `git add -f cv.pdf`

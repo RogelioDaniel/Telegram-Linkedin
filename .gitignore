@@ -3,3 +3,4 @@
 __pycache__/
 .venv/
 client_secret*.json
+preview.html

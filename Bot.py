@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
+import html
 import json
 import logging
 import mimetypes
@@ -99,6 +100,9 @@ class Settings:
     my_email: str
     my_headline: str
     my_skills: list[str]
+    my_phone: str
+    my_linkedin: str
+    my_github: str
     cv_path: Path
     smtp_host: str
     smtp_port: int
@@ -142,6 +146,9 @@ class Settings:
             my_email=_require("MY_EMAIL"),
             my_headline=os.getenv("MY_HEADLINE", "desarrollador de software"),
             my_skills=[s.strip() for s in os.getenv("MY_SKILLS", "").split(",") if s.strip()],
+            my_phone=os.getenv("MY_PHONE", "").strip(),
+            my_linkedin=os.getenv("MY_LINKEDIN", "").strip(),
+            my_github=os.getenv("MY_GITHUB", "").strip(),
             cv_path=cv,
             smtp_host=os.getenv("SMTP_HOST", "smtp.office365.com"),
             smtp_port=int(os.getenv("SMTP_PORT", "587")),
@@ -164,6 +171,7 @@ class Draft:
     to: str
     subject: str
     body: str
+    html: str = ""
 
 
 # --------------------------------------------------------------------------- IA
@@ -295,25 +303,99 @@ def build_draft(cfg: Settings, job: dict, to: str) -> Draft:
     cubiertos = [r for r in requisitos if any(s in r.lower() or r.lower() in s for s in skills_lc)]
 
     lugar = ", ".join(x for x in (modalidad, ubicacion) if x)
-    partes = [
-        f"Hola {contacto.split()[0]}," if contacto else "Hola,",
-        "",
+    saludo = f"Hola {contacto.split()[0]}," if contacto else "Hola,"
+    intro = (
         f"Mi nombre es {cfg.my_name}, {cfg.my_headline}. Vi tu publicación sobre {puesto}"
         + (f" en {empresa}" if empresa else "")
         + (f" ({lugar})" if lugar else "")
-        + " y me gustaría postularme.",
-    ]
+        + " y me gustaría postularme."
+    )
+    cierre = "Adjunto mi CV para tu revisión. Quedo atento a una posible entrevista."
+
+    contactos = [c for c in (cfg.my_email, cfg.my_phone, cfg.my_linkedin, cfg.my_github) if c]
+    partes = [saludo, "", intro]
     if cubiertos:
         partes += ["", "Cuento con experiencia en: " + ", ".join(cubiertos) + "."]
-    partes += [
-        "",
-        "Adjunto mi CV para tu revisión. Quedo atento a una posible entrevista.",
-        "",
-        "Saludos cordiales,",
-        cfg.my_name,
-        cfg.my_email,
-    ]
-    return Draft(to=to, subject=subject, body="\n".join(partes))
+    partes += ["", cierre, "", "Saludos cordiales,", cfg.my_name, cfg.my_headline, *contactos]
+    return Draft(
+        to=to,
+        subject=subject,
+        body="\n".join(partes),
+        html=_render_html(cfg, saludo, intro, cubiertos, cierre, puesto, empresa),
+    )
+
+
+_ACCENT = "#1F3A5F"  # azul marino sobrio; único color de acento del correo
+_FONT = "-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif"
+
+
+def _link(url: str, label: str | None = None) -> str:
+    """Enlace HTML seguro: solo http(s), mailto y tel; el resto se escapa como texto."""
+    text = html.escape(label or url)
+    if url.startswith(("https://", "http://", "mailto:", "tel:")):
+        return f'<a href="{html.escape(url, quote=True)}" style="color:{_ACCENT};text-decoration:none;">{text}</a>'
+    return text
+
+
+def _render_html(
+    cfg: Settings, saludo: str, intro: str, skills: list[str], cierre: str, puesto: str, empresa: str
+) -> str:
+    """Genera el cuerpo HTML del correo (tablas + estilos en línea, compatible con Gmail/Outlook).
+
+    Todo texto que proviene de la captura se escapa con ``html.escape``. Gmail elimina
+    scripts y animaciones, por lo que el diseño se limita a tipografía y espaciado.
+    """
+    e = html.escape
+    p_style = f"margin:0 0 16px 0;font-family:{_FONT};font-size:15px;line-height:1.6;color:#1f2937;"
+
+    chips = ""
+    if skills:
+        chip = (
+            "display:inline-block;margin:0 6px 6px 0;padding:4px 10px;border-radius:12px;"
+            f"background:#eef2f7;color:{_ACCENT};font-family:{_FONT};font-size:13px;line-height:1.4;"
+        )
+        spans = "".join(f'<span style="{chip}">{e(x)}</span>' for x in skills)
+        chips = (
+            f'<p style="{p_style}margin-bottom:8px;">Experiencia relevante para el puesto:</p>'
+            f'<div style="margin:0 0 20px 0;">{spans}</div>'
+        )
+
+    links = []
+    if cfg.my_email:
+        links.append(_link(f"mailto:{cfg.my_email}", cfg.my_email))
+    if cfg.my_phone:
+        links.append(_link("tel:" + re.sub(r"[^\d+]", "", cfg.my_phone), cfg.my_phone))
+    if cfg.my_linkedin:
+        links.append(_link(cfg.my_linkedin, "LinkedIn"))
+    if cfg.my_github:
+        links.append(_link(cfg.my_github, "GitHub"))
+    contact_line = " &nbsp;·&nbsp; ".join(links)
+
+    preheader = e(f"Postulación a {puesto}" + (f" en {empresa}" if empresa else "") + f" — {cfg.my_name}")
+    return f"""<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#ffffff;">
+<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:#ffffff;">{preheader}</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#ffffff;">
+<tr><td align="center" style="padding:24px 16px;">
+<table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;">
+<tr><td style="padding:0 0 4px 0;">
+<p style="{p_style}">{e(saludo)}</p>
+<p style="{p_style}">{e(intro)}</p>
+{chips}
+<p style="{p_style}">{e(cierre)}</p>
+<p style="{p_style}margin-bottom:24px;">Saludos cordiales,</p>
+</td></tr>
+<tr><td style="padding:16px 0 0 0;border-top:1px solid #e5e7eb;">
+<div style="width:40px;height:3px;background:{_ACCENT};margin:-17px 0 14px 0;"></div>
+<p style="margin:0;font-family:{_FONT};font-size:16px;font-weight:600;color:{_ACCENT};">{e(cfg.my_name)}</p>
+<p style="margin:2px 0 8px 0;font-family:{_FONT};font-size:13px;color:#6b7280;">{e(cfg.my_headline)}</p>
+<p style="margin:0 0 14px 0;font-family:{_FONT};font-size:13px;color:#6b7280;">{contact_line}</p>
+<p style="margin:0;font-family:{_FONT};font-size:12px;color:#9ca3af;">&#128206; CV adjunto en PDF</p>
+</td></tr>
+</table>
+</td></tr></table>
+</body></html>"""
 
 
 def _build_message(cfg: Settings, draft: Draft, *, with_from: bool) -> EmailMessage:
@@ -325,6 +407,8 @@ def _build_message(cfg: Settings, draft: Draft, *, with_from: bool) -> EmailMess
     msg["Subject"] = draft.subject
     msg["Reply-To"] = cfg.my_email
     msg.set_content(draft.body)
+    if draft.html:
+        msg.add_alternative(draft.html, subtype="html")
     mime, _ = mimetypes.guess_type(cfg.cv_path.name)
     maintype, _, subtype = (mime or "application/octet-stream").partition("/")
     msg.add_attachment(

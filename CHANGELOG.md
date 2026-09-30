@@ -13,6 +13,8 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 
 - Proveedores de visión adicionales (GitHub Models, Mistral, NVIDIA NIM) y reintento de la cadena completa con aviso en el chat y botón «Reintentar».
 
+- Correo en HTML con firma profesional y versión de texto plano; `preview_email.py` para previsualizarlo.
+
 ### Fixed
 - Reintentos con espera ante 429/5xx en proveedores de visión, varios modelos por proveedor y log con el motivo real del error.
 - `WEBHOOK_SECRET` en base64 (generado por Render) ya no se rechaza.

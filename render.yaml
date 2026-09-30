@@ -50,6 +50,12 @@ services:
         value: Rogelio Daniel
       - key: MY_HEADLINE
         value: desarrollador de software especializado en .NET y Business Central
+      - key: MY_PHONE
+        sync: false
+      - key: MY_LINKEDIN
+        sync: false
+      - key: MY_GITHUB
+        sync: false
       - key: MY_SKILLS
         value: .NET,React,Angular,APIs REST,Azure DevOps,SQL Server,Business Central
       - key: CV_PATH
