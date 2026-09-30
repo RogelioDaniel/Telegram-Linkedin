@@ -353,6 +353,11 @@ def build_draft(cfg: Settings, job: dict, to: str) -> Draft:
     )
 
 
+# GIF animado del botón (generado con tools/make_whatsapp_gif.py); se incrusta en el correo
+# como imagen en línea (CID) porque Gmail elimina el CSS animado pero sí reproduce GIFs.
+WA_GIF = Path(__file__).resolve().parent / "assets" / "whatsapp_button.gif"
+WA_CID = "wabtn"
+
 _ACCENT = "#1F3A5F"  # azul marino sobrio; único color de acento del correo
 _FONT = "-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif"
 
@@ -408,14 +413,21 @@ def _render_html(
 
     whatsapp = ""
     if wa_url:
-        btn = (
-            f"display:inline-block;padding:9px 16px;border:1px solid {_ACCENT};border-radius:6px;"
-            f"color:{_ACCENT};text-decoration:none;font-family:{_FONT};font-size:14px;font-weight:500;"
-        )
-        whatsapp = (
-            f'<p style="{p_style}margin-bottom:20px;">'
-            f'<a href="{e(wa_url, quote=True)}" style="{btn}">&#128172; Escríbeme por WhatsApp</a></p>'
-        )
+        href = e(wa_url, quote=True)
+        if WA_GIF.is_file():
+            # width/height fijos: el GIF se dibuja al doble para pantallas retina.
+            inner = (
+                f'<img src="cid:{WA_CID}" width="240" height="48" alt="Escríbeme por WhatsApp" '
+                'style="display:block;border:0;outline:none;text-decoration:none;">'
+            )
+            link_style = "display:inline-block;text-decoration:none;"
+        else:  # sin el GIF (p. ej. archivo ausente) queda un botón de texto equivalente
+            inner = "&#128172; Escríbeme por WhatsApp"
+            link_style = (
+                f"display:inline-block;padding:9px 16px;border:1px solid {_ACCENT};border-radius:6px;"
+                f"color:{_ACCENT};text-decoration:none;font-family:{_FONT};font-size:14px;font-weight:500;"
+            )
+        whatsapp = f'<p style="{p_style}margin-bottom:20px;"><a href="{href}" style="{link_style}">{inner}</a></p>'
 
     preheader = e(f"Postulación a {puesto}" + (f" en {empresa}" if empresa else "") + f" — {cfg.my_name}")
     return f"""<!DOCTYPE html>
@@ -455,6 +467,10 @@ def _build_message(cfg: Settings, draft: Draft, *, with_from: bool) -> EmailMess
     msg.set_content(draft.body)
     if draft.html:
         msg.add_alternative(draft.html, subtype="html")
+        if f"cid:{WA_CID}" in draft.html and WA_GIF.is_file():
+            msg.get_body(("html",)).add_related(
+                WA_GIF.read_bytes(), "image", "gif", cid=f"<{WA_CID}>", disposition="inline"
+            )
     mime, _ = mimetypes.guess_type(cfg.cv_path.name)
     maintype, _, subtype = (mime or "application/octet-stream").partition("/")
     msg.add_attachment(

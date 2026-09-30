@@ -32,7 +32,9 @@ Crea un `.env` con las variables de la tabla. Sin `WEBHOOK_URL`/`RENDER_EXTERNAL
 
 ## Plantilla del correo
 El correo se envía como HTML (tablas y estilos en línea, compatible con Gmail/Outlook) más una versión de texto
-plano de respaldo. Gmail elimina scripts y animaciones, por lo que no hay efectos al abrirlo. Para verlo sin enviar nada:
+plano de respaldo. Gmail elimina scripts y CSS animado, así que el botón de WhatsApp es un GIF animado incrustado
+(`assets/whatsapp_button.gif`, pulso suave que se repite 4 veces y queda quieto; se regenera con
+`python tools/make_whatsapp_gif.py`, requiere `pip install pillow`). Sin el GIF se usa un botón de texto. Para verlo sin enviar nada:
 ```bash
 python preview_email.py --open
 ```

@@ -5,6 +5,7 @@ Uso:
     python preview_email.py            # usa los datos de tu .env
     python preview_email.py --open     # además lo abre en el navegador
 """
+import base64
 import os
 import sys
 import webbrowser
@@ -37,7 +38,12 @@ job = {
 }
 draft = Bot.build_draft(cfg, job, "reclutador@empresa.com")
 out = Path(__file__).with_name("preview.html")
-out.write_text(draft.html, encoding="utf-8")
+# En el correo real el GIF va incrustado (cid:); para verlo en el navegador se pasa a data URI.
+page = draft.html
+if Bot.WA_GIF.is_file():
+    uri = "data:image/gif;base64," + base64.b64encode(Bot.WA_GIF.read_bytes()).decode()
+    page = page.replace(f"cid:{Bot.WA_CID}", uri)
+out.write_text(page, encoding="utf-8")
 print(f"Asunto: {draft.subject}\n\n{draft.body}\n\nVista previa HTML: {out}")
 if "--open" in sys.argv:
     webbrowser.open(out.as_uri())
