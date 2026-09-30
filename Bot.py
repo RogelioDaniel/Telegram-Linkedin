@@ -362,11 +362,11 @@ _ACCENT = "#1F3A5F"  # azul marino sobrio; único color de acento del correo
 _FONT = "-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif"
 
 
-def _link(url: str, label: str | None = None) -> str:
+def _link(url: str, label: str | None = None, color: str = "#1F3A5F") -> str:
     """Enlace HTML seguro: solo http(s), mailto y tel; el resto se escapa como texto."""
     text = html.escape(label or url)
     if url.startswith(("https://", "http://", "mailto:", "tel:")):
-        return f'<a href="{html.escape(url, quote=True)}" style="color:{_ACCENT};text-decoration:none;">{text}</a>'
+        return f'<a href="{html.escape(url, quote=True)}" style="color:{color};text-decoration:none;">{text}</a>'
     return text
 
 
@@ -383,17 +383,19 @@ def _render_html(
 ) -> str:
     """Genera el cuerpo HTML del correo (tablas + estilos en línea, compatible con Gmail/Outlook).
 
-    Diseño de «membrete»: tarjeta blanca sobre fondo gris claro, franja superior azul marino,
-    monograma con iniciales, recuadro con los datos de la vacante y firma con contactos.
+    Diseño: tarjeta blanca con franja superior azul marino, recuadro con los datos de la
+    vacante y, al final, una firma en formato de tarjeta de presentación (fondo azul oscuro,
+    monograma con aro dorado y contactos en filas etiquetadas).
     Todo texto que proviene de la captura se escapa con ``html.escape``. Gmail elimina
     scripts y CSS animado, por lo que el diseño se limita a tipografía, color y espaciado.
     """
     e = html.escape
     line = "#e3e8ef"
     muted = "#6b7280"
+    card_bg = "#14263F"
+    gold = "#C9A45C"
     p_style = f"margin:0 0 16px 0;font-family:{_FONT};font-size:15px;line-height:1.65;color:#1f2937;"
     label = f"font-family:{_FONT};font-size:11px;font-weight:600;letter-spacing:1.2px;color:{muted};text-transform:uppercase;"
-    divider = f'<div style="height:1px;line-height:1px;font-size:1px;background:{line};">&nbsp;</div>'
 
     initials = "".join(w[0] for w in cfg.my_name.split()[:2]).upper() or "•"
 
@@ -402,7 +404,7 @@ def _render_html(
     vacante = ""
     if puesto:
         vacante = (
-            '<tr><td style="padding:0 32px 20px 32px;">'
+            '<tr><td style="padding:0 24px 20px 24px;">'
             f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#f6f8fb" '
             f'style="background:#f6f8fb;border-left:3px solid {_ACCENT};border-radius:4px;">'
             '<tr><td style="padding:12px 16px;">'
@@ -420,7 +422,7 @@ def _render_html(
         )
         spans = "".join(f'<span style="{chip}">{e(x)}</span>' for x in skills)
         chips = (
-            '<tr><td style="padding:0 32px 12px 32px;">'
+            '<tr><td style="padding:0 24px 12px 24px;">'
             f'<div style="{label}margin-bottom:8px;">Experiencia relevante</div>'
             f'<div>{spans}</div></td></tr>'
         )
@@ -441,19 +443,38 @@ def _render_html(
                 f"display:inline-block;padding:9px 16px;border:1px solid {_ACCENT};border-radius:6px;"
                 f"color:{_ACCENT};text-decoration:none;font-family:{_FONT};font-size:14px;font-weight:500;"
             )
-        whatsapp = f'<tr><td style="padding:4px 32px 24px 32px;"><a href="{href}" style="{link_style}">{inner}</a></td></tr>'
+        whatsapp = f'<tr><td style="padding:4px 24px 24px 24px;"><a href="{href}" style="{link_style}">{inner}</a></td></tr>'
 
-    links = []
+    # Filas de contacto de la tarjeta: (etiqueta, HTML del valor).
+    def short(url: str) -> str:
+        return re.sub(r"^https?://(www\.)?", "", url).rstrip("/")
+
+    on_dark = "#ffffff"
+    filas: list[tuple[str, str]] = []
     if cfg.my_email:
-        links.append(_link(f"mailto:{cfg.my_email}", cfg.my_email))
+        filas.append(("Correo", _link(f"mailto:{cfg.my_email}", cfg.my_email, on_dark)))
     if cfg.my_phone:
-        # espacios no separables: el número no debe partirse en dos líneas
-        links.append(_link("tel:" + re.sub(r"[^\d+]", "", cfg.my_phone), cfg.my_phone.replace(" ", " ")))
+        tel = "tel:" + re.sub(r"[^\d+]", "", cfg.my_phone)
+        filas.append(("Teléfono", _link(tel, cfg.my_phone.replace(" ", "\u00a0"), on_dark)))
+    wa_digits = re.sub(r"\D", "", cfg.my_whatsapp)[-10:]
+    if wa_url and wa_digits and wa_digits != re.sub(r"\D", "", cfg.my_phone)[-10:]:
+        # formato legible +52 XX XXXX XXXX, sin saltos de l\u00ednea dentro del n\u00famero
+        bonito = f"+52\u00a0{wa_digits[:2]}\u00a0{wa_digits[2:6]}\u00a0{wa_digits[6:]}" if len(wa_digits) == 10 else cfg.my_whatsapp
+        filas.append(("WhatsApp", _link(wa_url, bonito, on_dark)))
     if cfg.my_linkedin:
-        links.append(_link(cfg.my_linkedin, "LinkedIn"))
+        filas.append(("LinkedIn", _link(cfg.my_linkedin, short(cfg.my_linkedin), on_dark)))
     if cfg.my_github:
-        links.append(_link(cfg.my_github, "GitHub"))
-    contact_line = " &nbsp;·&nbsp; ".join(links)
+        filas.append(("GitHub", _link(cfg.my_github, short(cfg.my_github), on_dark)))
+    rows = "".join(
+        f'<tr><td width="76" valign="top" style="padding:3px 0;font-family:{_FONT};font-size:10px;font-weight:600;'
+        f'letter-spacing:1px;color:{gold};text-transform:uppercase;">{e(lab)}</td>'
+        f'<td valign="top" style="padding:3px 0;font-family:{_FONT};font-size:13px;color:#e8edf5;word-break:break-word;">{val}</td></tr>'
+        for lab, val in filas
+    )
+    contactos = (
+        f'<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin-top:6px;">{rows}</table>'
+        if rows else ""
+    )
 
     preheader = e(f"Postulación a {puesto}" + (f" en {empresa}" if empresa else "") + f" — {cfg.my_name}")
     return f"""<!DOCTYPE html>
@@ -462,35 +483,36 @@ def _render_html(
 <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:#f3f5f8;">{preheader}</div>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#f3f5f8" style="background:#f3f5f8;">
 <tr><td align="center" style="padding:28px 12px;">
-<table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" bgcolor="#ffffff" style="width:100%;max-width:600px;background:#ffffff;border:1px solid {line};border-top:4px solid {_ACCENT};border-radius:10px;">
-<tr><td style="padding:24px 32px 20px 32px;">
-<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
-<td width="44" valign="top" style="width:44px;">
-<div style="width:44px;height:44px;line-height:44px;border-radius:22px;background:{_ACCENT};color:#ffffff;text-align:center;font-family:{_FONT};font-size:15px;font-weight:600;letter-spacing:1px;">{e(initials)}</div>
-</td>
-<td valign="top" style="padding-left:14px;">
-<div style="font-family:{_FONT};font-size:17px;font-weight:600;color:{_ACCENT};">{e(cfg.my_name)}</div>
-<div style="margin-top:2px;font-family:{_FONT};font-size:13px;color:{muted};">{e(cfg.my_headline)}</div>
-</td></tr></table>
-</td></tr>
-<tr><td style="padding:0 32px;">{divider}</td></tr>
-<tr><td style="padding:24px 32px 4px 32px;">
+<table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" bgcolor="#ffffff" style="width:100%;max-width:600px;table-layout:fixed;background:#ffffff;border:1px solid {line};border-top:4px solid {_ACCENT};border-radius:10px;">
+<tr><td style="padding:28px 24px 4px 24px;">
 <p style="{p_style}">{e(saludo)}</p>
 <p style="{p_style}">{e(intro)}</p>
 </td></tr>
 {vacante}
 {chips}
-<tr><td style="padding:8px 32px 4px 32px;">
+<tr><td style="padding:8px 24px 4px 24px;">
 <p style="{p_style}">{e(cierre)}</p>
 </td></tr>
 {whatsapp}
-<tr><td style="padding:0 32px 24px 32px;">
-<p style="margin:0 0 12px 0;font-family:{_FONT};font-size:15px;color:#1f2937;">Saludos cordiales,</p>
-<div style="font-family:{_FONT};font-size:15px;font-weight:600;color:{_ACCENT};">{e(cfg.my_name)}</div>
-<div style="margin-top:6px;font-family:{_FONT};font-size:13px;line-height:1.7;color:{muted};">{contact_line}</div>
+<tr><td style="padding:0 24px 16px 24px;">
+<p style="margin:0;font-family:{_FONT};font-size:15px;color:#1f2937;">Saludos cordiales,</p>
 </td></tr>
-<tr><td style="padding:0 32px;">{divider}</td></tr>
-<tr><td style="padding:14px 32px 20px 32px;font-family:{_FONT};font-size:12px;color:#9ca3af;">&#128206; Se adjunta CV en formato PDF</td></tr>
+<tr><td style="padding:0 24px 20px 24px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="{card_bg}" style="background:{card_bg};border-radius:10px;">
+<tr><td style="padding:20px 18px;">
+<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+<td width="44" valign="top" style="width:44px;">
+<div style="width:40px;height:40px;line-height:40px;border:2px solid {gold};border-radius:22px;color:#ffffff;text-align:center;font-family:{_FONT};font-size:14px;font-weight:600;letter-spacing:1px;">{e(initials)}</div>
+</td>
+<td valign="top" style="padding-left:16px;">
+<div style="font-family:{_FONT};font-size:18px;font-weight:600;color:#ffffff;">{e(cfg.my_name)}</div>
+<div style="margin-top:3px;font-family:{_FONT};font-size:13px;line-height:1.5;color:#b8c4d6;">{e(cfg.my_headline)}</div>
+</td></tr></table>
+<div style="width:36px;height:2px;line-height:2px;font-size:2px;background:{gold};margin:16px 0 6px 0;">&nbsp;</div>
+{contactos}
+</td></tr></table>
+</td></tr>
+<tr><td style="padding:0 24px 22px 24px;font-family:{_FONT};font-size:12px;color:#9ca3af;">&#128206; Se adjunta CV en formato PDF</td></tr>
 </table>
 </td></tr></table>
 </body></html>"""
