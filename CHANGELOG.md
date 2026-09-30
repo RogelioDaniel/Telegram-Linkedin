@@ -15,6 +15,8 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 
 - Correo en HTML con firma profesional y versión de texto plano; `preview_email.py` para previsualizarlo.
 
+- Botón de WhatsApp en el correo con mensaje precargado personalizado a la oferta (`MY_WHATSAPP`).
+
 ### Fixed
 - Reintentos con espera ante 429/5xx en proveedores de visión, varios modelos por proveedor y log con el motivo real del error.
 - `WEBHOOK_SECRET` en base64 (generado por Render) ya no se rechaza.

@@ -52,6 +52,8 @@ services:
         value: desarrollador de software especializado en .NET y Business Central
       - key: MY_PHONE
         sync: false
+      - key: MY_WHATSAPP
+        sync: false
       - key: MY_LINKEDIN
         sync: false
       - key: MY_GITHUB

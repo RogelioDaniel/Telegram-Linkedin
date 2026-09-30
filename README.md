@@ -21,6 +21,7 @@ Crea un `.env` con las variables de la tabla. Sin `WEBHOOK_URL`/`RENDER_EXTERNAL
 | `GEMINI_MODEL`, `GITHUB_MODEL`, `MISTRAL_MODEL`, `NVIDIA_MODEL`, `GROQ_MODEL`, `OPENROUTER_MODEL` | no | Lista de modelos con visión separados por coma, probados en orden. `GROQ_MODEL` no tiene valor por defecto: defínelo con un ID de visión vigente de console.groq.com/docs/models |
 | `MY_NAME`, `MY_EMAIL` | sí | Remitente |
 | `MY_HEADLINE`, `MY_SKILLS` | no | Presentación y skills que se pueden afirmar en el correo |
+| `MY_WHATSAPP` | no | Tu número (10 dígitos MX o con lada internacional); añade un botón de WhatsApp al correo con un mensaje precargado, redactado desde el punto de vista del reclutador |
 | `MY_PHONE`, `MY_LINKEDIN`, `MY_GITHUB` | no | Datos de contacto de la firma; solo se muestran los definidos (los enlaces deben empezar con `https://`) |
 | `CV_PATH` | sí | Ruta al PDF del CV |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER` | no | Def. `smtp.office365.com`, `587`, `MY_EMAIL`. Hotmail/Outlook.com personal: `smtp-mail.outlook.com` |

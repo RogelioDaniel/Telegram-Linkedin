@@ -25,6 +25,7 @@ cfg = SimpleNamespace(
     my_phone=os.getenv("MY_PHONE", ""),
     my_linkedin=os.getenv("MY_LINKEDIN", ""),
     my_github=os.getenv("MY_GITHUB", ""),
+    my_whatsapp=os.getenv("MY_WHATSAPP", ""),
 )
 job = {
     "empresa": "VALTRE",

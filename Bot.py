@@ -25,6 +25,7 @@ import ssl
 import sys
 import time
 import uuid
+from urllib.parse import quote
 from dataclasses import dataclass
 from email.message import EmailMessage
 from pathlib import Path
@@ -103,6 +104,7 @@ class Settings:
     my_phone: str
     my_linkedin: str
     my_github: str
+    my_whatsapp: str
     cv_path: Path
     smtp_host: str
     smtp_port: int
@@ -149,6 +151,7 @@ class Settings:
             my_phone=os.getenv("MY_PHONE", "").strip(),
             my_linkedin=os.getenv("MY_LINKEDIN", "").strip(),
             my_github=os.getenv("MY_GITHUB", "").strip(),
+            my_whatsapp=os.getenv("MY_WHATSAPP", "").strip(),
             cv_path=cv,
             smtp_host=os.getenv("SMTP_HOST", "smtp.office365.com"),
             smtp_port=int(os.getenv("SMTP_PORT", "587")),
@@ -287,6 +290,27 @@ def _clean(value: object, limit: int = 120) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip()[:limit]
 
 
+def _whatsapp_urls(cfg: Settings, contacto: str, puesto: str, empresa: str) -> tuple[str, str]:
+    """Devuelve (enlace con mensaje precargado, enlace simple) de WhatsApp, o ("", "").
+
+    Quien abre el enlace es el reclutador, así que el texto precargado está escrito
+    desde su punto de vista: le llega a tu WhatsApp como un mensaje suyo.
+    """
+    digits = re.sub(r"\D", "", cfg.my_whatsapp)
+    if len(digits) == 10:  # número mexicano sin lada internacional
+        digits = "52" + digits
+    if not 10 <= len(digits) <= 15:
+        return "", ""
+    nombre = cfg.my_name.split()[0] if cfg.my_name else ""
+    texto = (
+        f"Hola {nombre}, recibí tu postulación para {puesto}"
+        + (f" en {empresa}" if empresa else "")
+        + ". ¿Podemos platicar?"
+    )
+    base = f"https://wa.me/{digits}"
+    return f"{base}?text={quote(texto)}", base
+
+
 def build_draft(cfg: Settings, job: dict, to: str) -> Draft:
     """Arma asunto y mensaje a partir de los datos extraídos."""
     puesto = _clean(job.get("puesto")) or "la vacante publicada"
@@ -313,15 +337,19 @@ def build_draft(cfg: Settings, job: dict, to: str) -> Draft:
     cierre = "Adjunto mi CV para tu revisión. Quedo atento a una posible entrevista."
 
     contactos = [c for c in (cfg.my_email, cfg.my_phone, cfg.my_linkedin, cfg.my_github) if c]
+    wa_url, wa_simple = _whatsapp_urls(cfg, contacto, puesto, empresa)
     partes = [saludo, "", intro]
     if cubiertos:
         partes += ["", "Cuento con experiencia en: " + ", ".join(cubiertos) + "."]
-    partes += ["", cierre, "", "Saludos cordiales,", cfg.my_name, cfg.my_headline, *contactos]
+    partes += ["", cierre]
+    if wa_simple:
+        partes += ["", f"También puedes escribirme por WhatsApp: {wa_simple}"]
+    partes += ["", "Saludos cordiales,", cfg.my_name, cfg.my_headline, *contactos]
     return Draft(
         to=to,
         subject=subject,
         body="\n".join(partes),
-        html=_render_html(cfg, saludo, intro, cubiertos, cierre, puesto, empresa),
+        html=_render_html(cfg, saludo, intro, cubiertos, cierre, puesto, empresa, wa_url),
     )
 
 
@@ -338,7 +366,14 @@ def _link(url: str, label: str | None = None) -> str:
 
 
 def _render_html(
-    cfg: Settings, saludo: str, intro: str, skills: list[str], cierre: str, puesto: str, empresa: str
+    cfg: Settings,
+    saludo: str,
+    intro: str,
+    skills: list[str],
+    cierre: str,
+    puesto: str,
+    empresa: str,
+    wa_url: str = "",
 ) -> str:
     """Genera el cuerpo HTML del correo (tablas + estilos en línea, compatible con Gmail/Outlook).
 
@@ -371,6 +406,17 @@ def _render_html(
         links.append(_link(cfg.my_github, "GitHub"))
     contact_line = " &nbsp;·&nbsp; ".join(links)
 
+    whatsapp = ""
+    if wa_url:
+        btn = (
+            f"display:inline-block;padding:9px 16px;border:1px solid {_ACCENT};border-radius:6px;"
+            f"color:{_ACCENT};text-decoration:none;font-family:{_FONT};font-size:14px;font-weight:500;"
+        )
+        whatsapp = (
+            f'<p style="{p_style}margin-bottom:20px;">'
+            f'<a href="{e(wa_url, quote=True)}" style="{btn}">&#128172; Escríbeme por WhatsApp</a></p>'
+        )
+
     preheader = e(f"Postulación a {puesto}" + (f" en {empresa}" if empresa else "") + f" — {cfg.my_name}")
     return f"""<!DOCTYPE html>
 <html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
@@ -384,7 +430,7 @@ def _render_html(
 <p style="{p_style}">{e(intro)}</p>
 {chips}
 <p style="{p_style}">{e(cierre)}</p>
-<p style="{p_style}margin-bottom:24px;">Saludos cordiales,</p>
+{whatsapp}<p style="{p_style}margin-bottom:24px;">Saludos cordiales,</p>
 </td></tr>
 <tr><td style="padding:16px 0 0 0;border-top:1px solid #e5e7eb;">
 <div style="width:40px;height:3px;background:{_ACCENT};margin:-17px 0 14px 0;"></div>
