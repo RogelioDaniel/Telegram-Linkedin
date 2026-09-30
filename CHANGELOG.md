@@ -12,6 +12,7 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 - Extracción de la captura con varios proveedores de visión (Gemini, Groq, OpenRouter) y respaldo automático si uno falla.
 
 ### Fixed
+- Reintentos con espera ante 429/5xx en proveedores de visión, varios modelos por proveedor y log con el motivo real del error.
 - `WEBHOOK_SECRET` en base64 (generado por Render) ya no se rechaza.
 
 ### Changed

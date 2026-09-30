@@ -20,7 +20,7 @@ Crea un `.env` con las variables de la tabla. Sin `WEBHOOK_URL`/`RENDER_EXTERNAL
 | `GROQ_API_KEY` | al menos una de las 3 | Clave de Groq (tier gratuito) |
 | `OPENROUTER_API_KEY` | al menos una de las 3 | Clave de OpenRouter (los modelos sin sufijo `:free` son de pago) |
 | `VISION_ORDER` | no | Orden de proveedores; si uno falla se usa el siguiente (def. `gemini,groq,openrouter`) |
-| `GEMINI_MODEL`, `GROQ_MODEL` | no | Modelos con visión (def. `gemini-2.5-flash`, `meta-llama/llama-4-scout-17b-16e-instruct`); cámbialos si el proveedor los retira |
+| `GEMINI_MODEL`, `GROQ_MODEL` | no | Lista de modelos con visión separados por coma, probados en orden (def. `gemini-2.5-flash,gemini-2.5-flash-lite` y `meta-llama/llama-4-scout-17b-16e-instruct,meta-llama/llama-4-maverick-17b-128e-instruct`). Si un proveedor retira un modelo (404), sustitúyelo aquí |
 | `OPENROUTER_MODEL` | no | Modelo con visión (def. `openai/gpt-4o-mini`) |
 | `MY_NAME`, `MY_EMAIL` | sí | Remitente |
 | `MY_HEADLINE`, `MY_SKILLS` | no | Presentación y skills que se pueden afirmar en el correo |
@@ -42,6 +42,7 @@ Crea un `.env` con las variables de la tabla. Sin `WEBHOOK_URL`/`RENDER_EXTERNAL
 ## Runbook
 - **El bot tarda en responder:** plan free dormido; el primer mensaje tarda 30-60 s. Es normal.
 - **No responde nada:** revisa logs en Render; confirma que `TELEGRAM_ALLOWED_USER_ID` es tu ID.
+- **Visión `404` (modelo inexistente) / `503` (saturado):** los 5xx y 429 se reintentan solos; un 404 pasa al siguiente modelo. El log muestra el motivo devuelto por la API.
 - **`402 Payment Required` (OpenRouter):** sin saldo; el bot pasa al siguiente proveedor de `VISION_ORDER`. Añade `GEMINI_API_KEY` o `GROQ_API_KEY`.
 - **`Google OAuth 400 invalid_grant`:** el refresh token caducó o se revocó (app de Google Cloud en modo *Testing* caduca a los 7 días; publícala en *In production*). Repite `get_gmail_token.py` y actualiza `GMAIL_REFRESH_TOKEN`.
 - **`Network is unreachable` al enviar:** SMTP bloqueado en Render free; usa Gmail API.

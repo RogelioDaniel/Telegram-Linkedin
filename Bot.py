@@ -22,6 +22,7 @@ import re
 import smtplib
 import ssl
 import sys
+import time
 import uuid
 from dataclasses import dataclass
 from email.message import EmailMessage
@@ -56,6 +57,11 @@ def _require(name: str) -> str:
     return value
 
 
+def _csv(name: str, default: str) -> list[str]:
+    """Lee una lista separada por comas desde el entorno."""
+    return [v.strip() for v in os.getenv(name, default).split(",") if v.strip()]
+
+
 @dataclass(frozen=True)
 class Settings:
     """Configuración inmutable cargada desde el entorno."""
@@ -63,11 +69,11 @@ class Settings:
     telegram_token: str
     allowed_user_id: int
     openrouter_key: str
-    openrouter_model: str
+    openrouter_models: list[str]
     gemini_key: str
-    gemini_model: str
+    gemini_models: list[str]
     groq_key: str
-    groq_model: str
+    groq_models: list[str]
     vision_order: list[str]
     my_name: str
     my_email: str
@@ -103,11 +109,14 @@ class Settings:
             telegram_token=_require("TELEGRAM_BOT_TOKEN"),
             allowed_user_id=int(_require("TELEGRAM_ALLOWED_USER_ID")),
             openrouter_key=os.getenv("OPENROUTER_API_KEY", "").strip(),
-            openrouter_model=os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini"),
+            openrouter_models=_csv("OPENROUTER_MODEL", "openai/gpt-4o-mini"),
             gemini_key=os.getenv("GEMINI_API_KEY", "").strip(),
-            gemini_model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
+            gemini_models=_csv("GEMINI_MODEL", "gemini-2.5-flash,gemini-2.5-flash-lite"),
             groq_key=os.getenv("GROQ_API_KEY", "").strip(),
-            groq_model=os.getenv("GROQ_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct"),
+            groq_models=_csv(
+                "GROQ_MODEL",
+                "meta-llama/llama-4-scout-17b-16e-instruct,meta-llama/llama-4-maverick-17b-128e-instruct",
+            ),
             vision_order=[
                 v.strip().lower()
                 for v in os.getenv("VISION_ORDER", "gemini,groq,openrouter").split(",")
@@ -153,9 +162,25 @@ EXTRACTION_PROMPT = (
 )
 
 
+RETRYABLE = {429, 500, 502, 503, 504}
+
+
+def _post_with_retry(url: str, **kwargs) -> requests.Response:
+    """POST con reintentos y espera creciente ante errores transitorios (429/5xx)."""
+    for attempt in range(3):
+        resp = requests.post(url, timeout=40, **kwargs)
+        if resp.status_code not in RETRYABLE or attempt == 2:
+            break
+        time.sleep(2 * (attempt + 1))
+    if not resp.ok:
+        # El cuerpo explica el motivo real (modelo inexistente, cuota, saldo...).
+        raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:200]}")
+    return resp
+
+
 def _openai_compatible(url: str, key: str, model: str, b64: str, mime: str) -> str:
     """Llama a un endpoint /chat/completions compatible con OpenAI (OpenRouter, Groq)."""
-    resp = requests.post(
+    resp = _post_with_retry(
         url,
         headers={"Authorization": f"Bearer {key}"},
         json={
@@ -171,15 +196,13 @@ def _openai_compatible(url: str, key: str, model: str, b64: str, mime: str) -> s
                 }
             ],
         },
-        timeout=60,
     )
-    resp.raise_for_status()
     return resp.json()["choices"][0]["message"]["content"]
 
 
 def _gemini(key: str, model: str, b64: str, mime: str) -> str:
     """Llama a la API de Gemini (la clave va en cabecera, no en la URL, para no filtrarla en logs)."""
-    resp = requests.post(
+    resp = _post_with_retry(
         f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
         headers={"x-goog-api-key": key},
         json={
@@ -188,9 +211,7 @@ def _gemini(key: str, model: str, b64: str, mime: str) -> str:
             ],
             "generationConfig": {"temperature": 0},
         },
-        timeout=60,
     )
-    resp.raise_for_status()
     return resp.json()["candidates"][0]["content"]["parts"][0]["text"]
 
 
@@ -206,45 +227,42 @@ def _parse_job_json(content: str) -> dict:
 
 
 def extract_job_data(cfg: Settings, image: bytes, mime: str) -> dict:
-    """Extrae los campos de la oferta probando cada proveedor de visión en orden.
+    """Extrae los campos de la oferta probando proveedores y modelos en orden.
 
-    El orden sale de ``VISION_ORDER``; se omiten los proveedores sin clave y, si uno
-    falla (cuota, saldo, red, JSON inválido), se pasa al siguiente.
+    El orden de proveedores sale de ``VISION_ORDER`` y, dentro de cada uno, de su lista
+    de modelos. Se omiten los proveedores sin clave; si un intento falla (cuota, saldo,
+    modelo retirado, red, JSON inválido) se pasa al siguiente.
 
     Raises:
-        RuntimeError: si todos los proveedores configurados fallan.
+        RuntimeError: si todos los intentos fallan.
     """
     b64 = base64.b64encode(image).decode()
+    groq_url = "https://api.groq.com/openai/v1/chat/completions"
+    openrouter_url = "https://openrouter.ai/api/v1/chat/completions"
     providers = {
-        "gemini": (cfg.gemini_key, lambda: _gemini(cfg.gemini_key, cfg.gemini_model, b64, mime)),
+        "gemini": (cfg.gemini_key, cfg.gemini_models, lambda m: _gemini(cfg.gemini_key, m, b64, mime)),
         "groq": (
-            cfg.groq_key,
-            lambda: _openai_compatible(
-                "https://api.groq.com/openai/v1/chat/completions",
-                cfg.groq_key, cfg.groq_model, b64, mime,
-            ),
+            cfg.groq_key, cfg.groq_models,
+            lambda m: _openai_compatible(groq_url, cfg.groq_key, m, b64, mime),
         ),
         "openrouter": (
-            cfg.openrouter_key,
-            lambda: _openai_compatible(
-                "https://openrouter.ai/api/v1/chat/completions",
-                cfg.openrouter_key, cfg.openrouter_model, b64, mime,
-            ),
+            cfg.openrouter_key, cfg.openrouter_models,
+            lambda m: _openai_compatible(openrouter_url, cfg.openrouter_key, m, b64, mime),
         ),
     }
     errors: list[str] = []
     for name in cfg.vision_order:
-        key, call = providers.get(name, ("", None))
+        key, models, call = providers.get(name, ("", [], None))
         if not key or call is None:
             continue
-        try:
-            job = _parse_job_json(call())
-            log.info("Extracción correcta con %s", name)
-            return job
-        except Exception as exc:
-            # str(exc) de requests incluye el código HTTP y la URL, nunca las claves.
-            log.warning("Proveedor de visión %s falló: %s", name, exc)
-            errors.append(f"{name}: {type(exc).__name__}")
+        for model in models:
+            try:
+                job = _parse_job_json(call(model))
+                log.info("Extracción correcta con %s (%s)", name, model)
+                return job
+            except Exception as exc:
+                log.warning("Visión %s/%s falló: %s", name, model, exc)
+                errors.append(f"{name}/{model}")
     raise RuntimeError("Todos los proveedores de visión fallaron: " + ", ".join(errors))
 
 
