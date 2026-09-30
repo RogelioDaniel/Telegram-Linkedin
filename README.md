@@ -16,12 +16,9 @@ Crea un `.env` con las variables de la tabla. Sin `WEBHOOK_URL`/`RENDER_EXTERNAL
 |---|---|---|
 | `TELEGRAM_BOT_TOKEN` | sí | Token de @BotFather |
 | `TELEGRAM_ALLOWED_USER_ID` | sí | ID numérico del único usuario autorizado |
-| `GEMINI_API_KEY` | al menos una de las 3 | Clave de Google AI Studio (tier gratuito) |
-| `GROQ_API_KEY` | al menos una de las 3 | Clave de Groq (tier gratuito) |
-| `OPENROUTER_API_KEY` | al menos una de las 3 | Clave de OpenRouter (los modelos sin sufijo `:free` son de pago) |
-| `VISION_ORDER` | no | Orden de proveedores; si uno falla se usa el siguiente (def. `gemini,groq,openrouter`) |
-| `GEMINI_MODEL`, `GROQ_MODEL` | no | Lista de modelos con visión separados por coma, probados en orden (def. `gemini-2.5-flash,gemini-2.5-flash-lite` y `meta-llama/llama-4-scout-17b-16e-instruct,meta-llama/llama-4-maverick-17b-128e-instruct`). Si un proveedor retira un modelo (404), sustitúyelo aquí |
-| `OPENROUTER_MODEL` | no | Modelo con visión (def. `openai/gpt-4o-mini`) |
+| `GEMINI_API_KEY`, `GITHUB_MODELS_TOKEN`, `MISTRAL_API_KEY`, `NVIDIA_API_KEY`, `GROQ_API_KEY`, `OPENROUTER_API_KEY` | al menos una | Claves de los proveedores de visión; solo se usan los que tengan clave |
+| `VISION_ORDER` | no | Orden de proveedores (def. `gemini,github,mistral,nvidia,groq,openrouter`); si uno falla se usa el siguiente |
+| `GEMINI_MODEL`, `GITHUB_MODEL`, `MISTRAL_MODEL`, `NVIDIA_MODEL`, `GROQ_MODEL`, `OPENROUTER_MODEL` | no | Lista de modelos con visión separados por coma, probados en orden. `GROQ_MODEL` no tiene valor por defecto: defínelo con un ID de visión vigente de console.groq.com/docs/models |
 | `MY_NAME`, `MY_EMAIL` | sí | Remitente |
 | `MY_HEADLINE`, `MY_SKILLS` | no | Presentación y skills que se pueden afirmar en el correo |
 | `CV_PATH` | sí | Ruta al PDF del CV |
@@ -42,7 +39,7 @@ Crea un `.env` con las variables de la tabla. Sin `WEBHOOK_URL`/`RENDER_EXTERNAL
 ## Runbook
 - **El bot tarda en responder:** plan free dormido; el primer mensaje tarda 30-60 s. Es normal.
 - **No responde nada:** revisa logs en Render; confirma que `TELEGRAM_ALLOWED_USER_ID` es tu ID.
-- **Visión `404` (modelo inexistente) / `503` (saturado):** los 5xx y 429 se reintentan solos; un 404 pasa al siguiente modelo. El log muestra el motivo devuelto por la API.
+- **Visión `404` (modelo retirado) / `503` (saturado):** los 5xx y 429 se reintentan solos; un 404 pasa al siguiente modelo. Si todos los proveedores fallan, el bot reintenta la cadena completa hasta 6 veces (esperas de 10-60 s), avisando en el chat, y si aun así no hay respuesta guarda la captura y ofrece el botón «Reintentar». El log muestra el motivo devuelto por cada API.
 - **`402 Payment Required` (OpenRouter):** sin saldo; el bot pasa al siguiente proveedor de `VISION_ORDER`. Añade `GEMINI_API_KEY` o `GROQ_API_KEY`.
 - **`Google OAuth 400 invalid_grant`:** el refresh token caducó o se revocó (app de Google Cloud en modo *Testing* caduca a los 7 días; publícala en *In production*). Repite `get_gmail_token.py` y actualiza `GMAIL_REFRESH_TOKEN`.
 - **`Network is unreachable` al enviar:** SMTP bloqueado en Render free; usa Gmail API.

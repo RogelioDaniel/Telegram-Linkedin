@@ -63,17 +63,37 @@ def _csv(name: str, default: str) -> list[str]:
 
 
 @dataclass(frozen=True)
+class VisionProvider:
+    """Proveedor de visión: clave, modelos a probar en orden y endpoint (None = Gemini)."""
+
+    key: str
+    models: list[str]
+    url: str | None
+
+
+# nombre -> (env de la clave, env de modelos, modelos por defecto, endpoint /chat/completions)
+# Groq no lleva modelo por defecto porque sus IDs de visión cambian; define GROQ_MODEL.
+VISION_SPECS: dict[str, tuple[str, str, str, str | None]] = {
+    "gemini": ("GEMINI_API_KEY", "GEMINI_MODEL", "gemini-2.5-flash,gemini-3.5-flash-lite", None),
+    "github": ("GITHUB_MODELS_TOKEN", "GITHUB_MODEL", "openai/gpt-4o-mini",
+               "https://models.github.ai/inference/chat/completions"),
+    "mistral": ("MISTRAL_API_KEY", "MISTRAL_MODEL", "mistral-small-latest",
+                "https://api.mistral.ai/v1/chat/completions"),
+    "nvidia": ("NVIDIA_API_KEY", "NVIDIA_MODEL", "meta/llama-3.2-11b-vision-instruct",
+               "https://integrate.api.nvidia.com/v1/chat/completions"),
+    "groq": ("GROQ_API_KEY", "GROQ_MODEL", "", "https://api.groq.com/openai/v1/chat/completions"),
+    "openrouter": ("OPENROUTER_API_KEY", "OPENROUTER_MODEL", "openai/gpt-4o-mini",
+                   "https://openrouter.ai/api/v1/chat/completions"),
+}
+
+
+@dataclass(frozen=True)
 class Settings:
     """Configuración inmutable cargada desde el entorno."""
 
     telegram_token: str
     allowed_user_id: int
-    openrouter_key: str
-    openrouter_models: list[str]
-    gemini_key: str
-    gemini_models: list[str]
-    groq_key: str
-    groq_models: list[str]
+    vision: dict[str, "VisionProvider"]
     vision_order: list[str]
     my_name: str
     my_email: str
@@ -103,23 +123,19 @@ class Settings:
             sys.exit("Gmail incompleto: define GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET y GMAIL_REFRESH_TOKEN")
         if not any(gmail.values()) and not smtp_pass:
             sys.exit("Define las credenciales de Gmail API (recomendado en Render) o SMTP_PASSWORD")
-        if not any(os.getenv(k, "").strip() for k in ("GEMINI_API_KEY", "GROQ_API_KEY", "OPENROUTER_API_KEY")):
-            sys.exit("Define al menos una clave de visión: GEMINI_API_KEY, GROQ_API_KEY u OPENROUTER_API_KEY")
+        vision = {
+            name: VisionProvider(os.getenv(key_env, "").strip(), _csv(model_env, models), url)
+            for name, (key_env, model_env, models, url) in VISION_SPECS.items()
+        }
+        if not any(v.key and v.models for v in vision.values()):
+            sys.exit("Define al menos una clave de visión (ver VISION_SPECS / README)")
         return cls(
             telegram_token=_require("TELEGRAM_BOT_TOKEN"),
             allowed_user_id=int(_require("TELEGRAM_ALLOWED_USER_ID")),
-            openrouter_key=os.getenv("OPENROUTER_API_KEY", "").strip(),
-            openrouter_models=_csv("OPENROUTER_MODEL", "openai/gpt-4o-mini"),
-            gemini_key=os.getenv("GEMINI_API_KEY", "").strip(),
-            gemini_models=_csv("GEMINI_MODEL", "gemini-2.5-flash,gemini-2.5-flash-lite"),
-            groq_key=os.getenv("GROQ_API_KEY", "").strip(),
-            groq_models=_csv(
-                "GROQ_MODEL",
-                "meta-llama/llama-4-scout-17b-16e-instruct,meta-llama/llama-4-maverick-17b-128e-instruct",
-            ),
+            vision=vision,
             vision_order=[
                 v.strip().lower()
-                for v in os.getenv("VISION_ORDER", "gemini,groq,openrouter").split(",")
+                for v in os.getenv("VISION_ORDER", ",".join(VISION_SPECS)).split(",")
                 if v.strip()
             ],
             my_name=_require("MY_NAME"),
@@ -237,27 +253,18 @@ def extract_job_data(cfg: Settings, image: bytes, mime: str) -> dict:
         RuntimeError: si todos los intentos fallan.
     """
     b64 = base64.b64encode(image).decode()
-    groq_url = "https://api.groq.com/openai/v1/chat/completions"
-    openrouter_url = "https://openrouter.ai/api/v1/chat/completions"
-    providers = {
-        "gemini": (cfg.gemini_key, cfg.gemini_models, lambda m: _gemini(cfg.gemini_key, m, b64, mime)),
-        "groq": (
-            cfg.groq_key, cfg.groq_models,
-            lambda m: _openai_compatible(groq_url, cfg.groq_key, m, b64, mime),
-        ),
-        "openrouter": (
-            cfg.openrouter_key, cfg.openrouter_models,
-            lambda m: _openai_compatible(openrouter_url, cfg.openrouter_key, m, b64, mime),
-        ),
-    }
     errors: list[str] = []
     for name in cfg.vision_order:
-        key, models, call = providers.get(name, ("", [], None))
-        if not key or call is None:
+        prov = cfg.vision.get(name)
+        if prov is None or not prov.key:
             continue
-        for model in models:
+        for model in prov.models:
             try:
-                job = _parse_job_json(call(model))
+                if prov.url is None:
+                    content = _gemini(prov.key, model, b64, mime)
+                else:
+                    content = _openai_compatible(prov.url, prov.key, model, b64, mime)
+                job = _parse_job_json(content)
                 log.info("Extracción correcta con %s (%s)", name, model)
                 return job
             except Exception as exc:
@@ -408,24 +415,44 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 
-async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    cfg = _cfg(context)
-    if not _authorized(update, cfg):
-        return
-    msg = update.message
-    if msg.photo:
-        tg_file, mime = await msg.photo[-1].get_file(), "image/jpeg"
-    else:  # imagen enviada como archivo (sin compresión, mejor para OCR)
-        tg_file, mime = await msg.document.get_file(), msg.document.mime_type or "image/png"
+RETRY_WAITS = (10, 20, 30, 45, 60)  # segundos entre rondas completas de proveedores
 
-    await msg.reply_text("📸 Analizando la captura…")
-    image = bytes(await tg_file.download_as_bytearray())
-    try:
-        job = await asyncio.to_thread(extract_job_data, cfg, image, mime)
-    except Exception:
-        log.exception("Fallo en extracción")
-        await msg.reply_text("⚠️ No pude analizar la imagen. Intenta con otra captura más nítida.")
+
+async def _extract_with_retries(cfg: Settings, image: bytes, mime: str, status) -> dict | None:
+    """Reintenta la cadena completa de proveedores mientras estén saturados.
+
+    Devuelve None si tras todas las rondas ninguno respondió. Informa el progreso
+    editando ``status`` (mensaje de Telegram).
+    """
+    for attempt in range(len(RETRY_WAITS) + 1):
+        try:
+            return await asyncio.to_thread(extract_job_data, cfg, image, mime)
+        except RuntimeError:
+            if attempt == len(RETRY_WAITS):
+                return None
+            wait = RETRY_WAITS[attempt]
+            await status.edit_text(
+                f"⏳ Los servicios de IA están saturados. Reintentando en {wait} s "
+                f"(intento {attempt + 2}/{len(RETRY_WAITS) + 1})…"
+            )
+            await asyncio.sleep(wait)
+    return None
+
+
+async def _analyze_and_offer(msg, context: ContextTypes.DEFAULT_TYPE, image: bytes, mime: str) -> None:
+    """Extrae los datos de la captura (con reintentos) y muestra el borrador."""
+    cfg = _cfg(context)
+    status = await msg.reply_text("📸 Analizando la captura…")
+    job = await _extract_with_retries(cfg, image, mime, status)
+    if job is None:
+        log.error("Extracción agotó todos los reintentos")
+        context.user_data["retry"] = {"image": image, "mime": mime}
+        await status.edit_text(
+            "⚠️ Los servicios de IA siguen saturados. Guardé tu captura: pulsa «Reintentar» en unos minutos.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔄 Reintentar", callback_data="retry")]]),
+        )
         return
+    await status.delete()
 
     email = _clean(job.get("email"), 254)
     context.user_data["job"] = job
@@ -437,7 +464,32 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             "Respóndeme con el correo del reclutador."
         )
         return
-    await _offer_draft(update, context, email)
+    await _offer_draft(msg, context, email)
+
+
+async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not _authorized(update, _cfg(context)):
+        return
+    msg = update.message
+    if msg.photo:
+        tg_file, mime = await msg.photo[-1].get_file(), "image/jpeg"
+    else:  # imagen enviada como archivo (sin compresión, mejor para OCR)
+        tg_file, mime = await msg.document.get_file(), msg.document.mime_type or "image/png"
+    image = bytes(await tg_file.download_as_bytearray())
+    await _analyze_and_offer(msg, context, image, mime)
+
+
+async def handle_retry(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    if not _authorized(update, _cfg(context)):
+        return
+    saved = context.user_data.pop("retry", None)
+    if saved is None:
+        await query.edit_message_text("Esa captura ya no está guardada. Envíala de nuevo.")
+        return
+    await query.message.delete()
+    await _analyze_and_offer(query.message, context, saved["image"], saved["mime"])
 
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -452,14 +504,14 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await update.message.reply_text("Ese correo no parece válido, intenta de nuevo.")
         return
     context.user_data["awaiting_email"] = False
-    await _offer_draft(update, context, email)
+    await _offer_draft(update.message, context, email)
 
 
-async def _offer_draft(update: Update, context: ContextTypes.DEFAULT_TYPE, to: str) -> None:
+async def _offer_draft(msg, context: ContextTypes.DEFAULT_TYPE, to: str) -> None:
     draft = build_draft(_cfg(context), context.user_data["job"], to)
     token = uuid.uuid4().hex[:12]
     context.user_data.setdefault("drafts", {})[token] = draft
-    await update.message.reply_text(_preview(draft), reply_markup=_keyboard(token))
+    await msg.reply_text(_preview(draft), reply_markup=_keyboard(token))
 
 
 async def handle_decision(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -499,12 +551,15 @@ async def handle_decision(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 def main() -> None:
     cfg = Settings.load()
-    app = Application.builder().token(cfg.telegram_token).build()
+    # concurrent_updates: el reintento de visión puede tardar minutos y no debe
+    # bloquear otros mensajes ni los botones.
+    app = Application.builder().token(cfg.telegram_token).concurrent_updates(True).build()
     app.bot_data["cfg"] = cfg
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(MessageHandler(filters.PHOTO | filters.Document.IMAGE, handle_image))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(CallbackQueryHandler(handle_decision, pattern=r"^(send|cancel):"))
+    app.add_handler(CallbackQueryHandler(handle_retry, pattern=r"^retry$"))
     if not cfg.webhook_url:
         log.info("Bot en marcha (polling, modo local).")
         app.run_polling()
